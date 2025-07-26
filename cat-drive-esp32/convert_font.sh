@@ -1,0 +1,1 @@
+./otf2bdf/otf2bdf -r 48 -p 16 NotoSans-Regular.otf -o notosans.bdf && ./bdfconv/bdfconv.exe -v -f 1 -m '$00-$7f, $80-$ff, $100-$24f, $1e00-$1eff, $300-$36f, $20ab' -n notosans -o notosans.c notosans.bdf
