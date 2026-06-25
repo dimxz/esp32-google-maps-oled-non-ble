@@ -1,122 +1,136 @@
 package com.meomeo.catdrive.ui
 
-import android.annotation.SuppressLint
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.os.Parcelable
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.FrameLayout
-import android.widget.TextView
+import android.text.InputType
+import android.view.MenuItem
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.RecyclerView
 import com.meomeo.catdrive.R
-import com.meomeo.catdrive.utils.PermissionCheck
-import kotlinx.parcelize.Parcelize
-import kotlinx.serialization.Serializable
-import timber.log.Timber
+import com.meomeo.catdrive.SHARED_PREFERENCES_FILE
+import com.meomeo.catdrive.service.DEFAULT_ESP_HOST
+import com.meomeo.catdrive.service.DEFAULT_ESP_PORT
 
-class CustomAdapter(onSelectCallback: (BluetoothDevice) -> Unit) : RecyclerView.Adapter<CustomAdapter.ViewHolder>() {
-    private var mDataSet: List<BluetoothDevice> = mutableListOf()
-    private val mOnSelectCallback = onSelectCallback
-
-    var dataSet
-        get() = mDataSet
-        set(value) {
-            if (value == mDataSet)
-                return
-            mDataSet = value
-            notifyDataSetChanged()
-        }
-
-    class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val txtDeviceName: TextView
-        val txtDeviceAddress: TextView
-        val frame: FrameLayout
-
-        init {
-            txtDeviceName = view.findViewById(R.id.txtItemDeviceName)
-            txtDeviceAddress = view.findViewById(R.id.txtItemMacAddress)
-            frame = view.findViewById(R.id.frame)
-        }
-    }
-
-    // Create new views (invoked by the layout manager)
-    override fun onCreateViewHolder(viewGroup: ViewGroup, viewType: Int): ViewHolder {
-        // Create a new view, which defines the UI of the list item
-        val view = LayoutInflater.from(viewGroup.context)
-            .inflate(R.layout.device_row_item, viewGroup, false)
-
-        return ViewHolder(view)
-    }
-
-    // Replace the contents of a view (invoked by the layout manager)
-    @SuppressLint("MissingPermission")
-    override fun onBindViewHolder(viewHolder: ViewHolder, position: Int) {
-
-        // Get element from your dataset at this position and replace the
-        // contents of the view with that element
-        viewHolder.txtDeviceName.text = dataSet[position].name
-        viewHolder.txtDeviceAddress.text = dataSet[position].address
-
-        viewHolder.frame.setOnClickListener { _ -> mOnSelectCallback(dataSet[position]) }
-    }
-
-    // Return the size of your dataset (invoked by the layout manager)
-    override fun getItemCount() = dataSet.size
-}
-
+/**
+ * Replaces DeviceSelectionActivity (Bluetooth picker).
+ *
+ * Shows a simple form:
+ *   ┌──────────────────────────────────┐
+ *   │  ESP8266 IP address              │
+ *   │  [ 192.168.4.1              ]    │
+ *   │  Port                            │
+ *   │  [ 8080                     ]    │
+ *   │  ℹ️  Connect your phone to the   │
+ *   │     "ArvNav" WiFi network first. │
+ *   │                                  │
+ *   │         [ Connect ]              │
+ *   └──────────────────────────────────┘
+ *
+ * On "Connect" it saves the values to SharedPreferences and returns
+ * RESULT_OK with host/port extras — matching what MainActivity expects.
+ */
 class DeviceSelectionActivity : AppCompatActivity() {
-    private lateinit var mViewDeviceAdapter: CustomAdapter
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        getDeviceList()
-    }
-
-    private fun onDeviceSelected(device: BluetoothDevice) {
-        Timber.w(device.toString())
-        setResult(RESULT_OK, Intent().apply { putExtra("device", device) })
-        finish()
-    }
+    private lateinit var mHostInput: EditText
+    private lateinit var mPortInput: EditText
+    private lateinit var mConnectButton: Button
+    private lateinit var mHintText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_device_selection)
 
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-
-        mViewDeviceAdapter = CustomAdapter(this::onDeviceSelected)
-        findViewById<RecyclerView?>(R.id.viewDeviceList).apply { adapter = mViewDeviceAdapter }
-        findViewById<Button>(R.id.btnScan).apply {
-            setOnClickListener {
-                getDeviceList()
-            }
+        supportActionBar?.apply {
+            setDisplayHomeAsUpEnabled(true)
+            title = "Connect to ESP8266"
         }
 
-        if (PermissionCheck.isBluetoothEnabled(this))
-            getDeviceList()
-        else
-            PermissionCheck.requestEnableBluetooth(this)
+        // ── Build layout programmatically (no XML needed) ──────────────────
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(64, 64, 64, 64)
+        }
+
+        val sp = getSharedPreferences(SHARED_PREFERENCES_FILE, Context.MODE_PRIVATE)
+        val savedHost = sp.getString("last_device_address", DEFAULT_ESP_HOST) ?: DEFAULT_ESP_HOST
+        val savedPort = sp.getInt("last_device_port", DEFAULT_ESP_PORT)
+
+        // IP label + field
+        root.addView(TextView(this).apply { text = "ESP8266 IP address" })
+        mHostInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setText(savedHost)
+            hint = DEFAULT_ESP_HOST
+        }
+        root.addView(mHostInput)
+
+        // Port label + field
+        root.addView(TextView(this).apply {
+            text = "Port"
+            setPadding(0, 32, 0, 0)
+        })
+        mPortInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(savedPort.toString())
+            hint = DEFAULT_ESP_PORT.toString()
+        }
+        root.addView(mPortInput)
+
+        // Hint
+        mHintText = TextView(this).apply {
+            text = "ℹ️  Connect your phone to the \"ArvNav\" WiFi network before tapping Connect."
+            setPadding(0, 48, 0, 48)
+            alpha = 0.7f
+        }
+        root.addView(mHintText)
+
+        // Connect button
+        mConnectButton = Button(this).apply {
+            text = "Connect"
+            setOnClickListener { onConnectClicked() }
+        }
+        root.addView(mConnectButton)
+
+        setContentView(root)
     }
 
-    @SuppressLint("MissingPermission")
-    private fun getDeviceList() {
-        val adapter = (applicationContext.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter!!
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == android.R.id.home) { finish(); return true }
+        return super.onOptionsItemSelected(item)
+    }
 
-        if (!PermissionCheck.checkBluetoothPermissions(this)) {
-            Timber.e("No bluetooth permission")
-            PermissionCheck.requestBluetoothAccessPermissions(this)
+    private fun onConnectClicked() {
+        val host = mHostInput.text.toString().trim().ifEmpty { DEFAULT_ESP_HOST }
+        val port = mPortInput.text.toString().trim().toIntOrNull() ?: DEFAULT_ESP_PORT
+
+        // Basic validation
+        if (!isValidIp(host) && host != "localhost") {
+            Toast.makeText(this, "Enter a valid IP address (e.g. 192.168.4.1)", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (port !in 1..65535) {
+            Toast.makeText(this, "Port must be between 1 and 65535", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val pairedDevices = adapter.bondedDevices
-        mViewDeviceAdapter.dataSet = pairedDevices.toList()
+        // Save for next time
+        getSharedPreferences(SHARED_PREFERENCES_FILE, Context.MODE_PRIVATE).edit().apply {
+            putString("last_device_address", host)
+            putString("last_device_name",    host)   // keep key for compatibility
+            putInt   ("last_device_port",    port)
+            apply()
+        }
+
+        setResult(RESULT_OK, Intent().apply {
+            putExtra("host", host)
+            putExtra("port", port)
+        })
+        finish()
     }
 
+    private fun isValidIp(ip: String): Boolean {
+        val parts = ip.split(".")
+        if (parts.size != 4) return false
+        return parts.all { part -> part.toIntOrNull()?.let { it in 0..255 } == true }
+    }
 }

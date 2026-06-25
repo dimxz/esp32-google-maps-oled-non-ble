@@ -20,7 +20,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private lateinit var mAccessNotificationCheckbox: CheckBoxPreference
     private lateinit var mPostNotificationCheckbox: CheckBoxPreference
     private lateinit var mAccessLocationCheckbox: CheckBoxPreference
-    private lateinit var mAccessBluetoothCheckbox: CheckBoxPreference
+    // mAccessBluetoothCheckbox removed — no Bluetooth needed
     private lateinit var mConnectDeviceButton: Preference
     private lateinit var mDisplayBacklightSwitch: SwitchPreference
     private lateinit var mSpeedLimitEdit: EditTextPreference
@@ -43,11 +43,12 @@ class SettingsFragment : PreferenceFragmentCompat() {
             refreshSettings()
         }
 
-        viewModel.connectedDevice.observe(viewLifecycleOwner) {
-            if (PermissionCheck.checkBluetoothConnectPermission(requireContext()))
-                mConnectDeviceButton.summary = if (it !== null) "Connected to ${it.name}" else "No device connected"
+        // connectedDevice now carries the IP string in device.name / device.address
+        viewModel.connectedDevice.observe(viewLifecycleOwner) { device ->
+            mConnectDeviceButton.summary = if (device != null)
+                "Connected to ${device.name}"   // device.name == host IP in WiFi version
             else
-                mConnectDeviceButton.summary = "Please check bluetooth permissions!"
+                "Tap to set ESP8266 address"
         }
 
         return super.onCreateView(inflater, container, savedInstanceState)
@@ -58,64 +59,52 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         val mainActivity = activity as MainActivity
 
-        mServiceEnableSwitch = preferenceScreen.findPreference("enable_service")!!
+        mServiceEnableSwitch        = preferenceScreen.findPreference("enable_service")!!
         mAccessNotificationCheckbox = preferenceScreen.findPreference("access_notification")!!
-        mPostNotificationCheckbox = preferenceScreen.findPreference("post_notification")!!
-        mAccessLocationCheckbox = preferenceScreen.findPreference("access_location")!!
-        mAccessBluetoothCheckbox = preferenceScreen.findPreference("access_bluetooth")!!
-        mConnectDeviceButton = preferenceScreen.findPreference("connect_device")!!
-        mDisplayBacklightSwitch = preferenceScreen.findPreference("device_backlight")!!
-        mSpeedLimitEdit = preferenceScreen.findPreference("speed_warning_limit")!!
+        mPostNotificationCheckbox   = preferenceScreen.findPreference("post_notification")!!
+        mAccessLocationCheckbox     = preferenceScreen.findPreference("access_location")!!
+        mConnectDeviceButton        = preferenceScreen.findPreference("connect_device")!!
+        mDisplayBacklightSwitch     = preferenceScreen.findPreference("device_backlight")!!
+        mSpeedLimitEdit             = preferenceScreen.findPreference("speed_warning_limit")!!
+
+        // Hide the Bluetooth permission row — not needed for WiFi
+        preferenceScreen.findPreference<CheckBoxPreference>("access_bluetooth")?.isVisible = false
 
         mSharedPref = mainActivity.getSharedPreferences(SHARED_PREFERENCES_FILE, Context.MODE_PRIVATE)
 
         refreshSettings()
 
         mServiceEnableSwitch.setOnPreferenceChangeListener { _, newValue ->
-            if (newValue as Boolean)
-                ServiceManager.startBroadcastService(mainActivity)
-            else
-                ServiceManager.stopBroadcastService(mainActivity)
+            if (newValue as Boolean) ServiceManager.startBroadcastService(mainActivity)
+            else ServiceManager.stopBroadcastService(mainActivity)
             return@setOnPreferenceChangeListener true
         }
 
         mAccessNotificationCheckbox.setOnPreferenceChangeListener { _, newValue ->
-            if (newValue as Boolean)
-                PermissionCheck.requestNotificationAccessPermission(activity as MainActivity)
+            if (newValue as Boolean) PermissionCheck.requestNotificationAccessPermission(mainActivity)
             return@setOnPreferenceChangeListener false
         }
 
         mAccessLocationCheckbox.setOnPreferenceChangeListener { _, newValue ->
-            if (newValue as Boolean)
-                PermissionCheck.requestLocationAccessPermission(activity as MainActivity)
+            if (newValue as Boolean) PermissionCheck.requestLocationAccessPermission(mainActivity)
             return@setOnPreferenceChangeListener false
         }
 
-        mAccessBluetoothCheckbox.setOnPreferenceChangeListener { _, newValue ->
-            if (newValue as Boolean)
-                PermissionCheck.requestBluetoothAccessPermissions(activity as MainActivity)
-            return@setOnPreferenceChangeListener false
-        }
-
-        mConnectDeviceButton.setOnPreferenceClickListener { _ ->
-            (activity as MainActivity).openDeviceSelectionActivity()
+        // Open the WiFi connection dialog instead of the BT picker
+        mConnectDeviceButton.setOnPreferenceClickListener {
+            mainActivity.openDeviceSelectionActivity()
             return@setOnPreferenceClickListener false
         }
 
         mDisplayBacklightSwitch.setOnPreferenceChangeListener { _, newValue ->
-            with(mSharedPref.edit()) {
-                putString("display_backlight", if (newValue as Boolean) "on" else "off")
-                apply()
-            }
+            mSharedPref.edit().putString("display_backlight", if (newValue as Boolean) "on" else "off").apply()
             return@setOnPreferenceChangeListener true
         }
 
         mSpeedLimitEdit.setOnPreferenceChangeListener { _, newValue ->
-            mSpeedLimitEdit.summary = (newValue as String) + " km/h"
-            with(mSharedPref.edit()) {
-                putInt("speed_limit", (newValue as String).toInt())
-                apply()
-            }
+            val limit = (newValue as String).toIntOrNull() ?: 60
+            mSpeedLimitEdit.summary = "$limit km/h"
+            mSharedPref.edit().putInt("speed_limit", limit).apply()
             return@setOnPreferenceChangeListener true
         }
     }
@@ -123,11 +112,15 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun refreshSettings() {
         val context = requireContext()
 
-        mServiceEnableSwitch.isEnabled = PermissionCheck.allPermissionsGranted(context)
+        // Service can start as long as notification + location permissions are granted
+        // (no Bluetooth required anymore)
+        val canStart = PermissionCheck.checkNotificationsAccessPermission(context)
+                    && PermissionCheck.checkLocationAccessPermission(context)
+        mServiceEnableSwitch.isEnabled = canStart
         mServiceEnableSwitch.isChecked = ServiceManager.isBroadcastServiceRunningInBackground(activity as MainActivity)
 
         mDisplayBacklightSwitch.isChecked = mSharedPref.getString("display_backlight", "off") == "on"
-        mSpeedLimitEdit.summary = mSharedPref.getInt("speed_limit", 0).toString() + " km/h"
+        mSpeedLimitEdit.summary = mSharedPref.getInt("speed_limit", 60).toString() + " km/h"
 
         PermissionCheck.checkNotificationsAccessPermission(context).also {
             mAccessNotificationCheckbox.isEnabled = !it
@@ -141,9 +134,9 @@ class SettingsFragment : PreferenceFragmentCompat() {
             mAccessLocationCheckbox.isEnabled = !it
             mAccessLocationCheckbox.isChecked = it
         }
-        PermissionCheck.checkBluetoothPermissions(context).also {
-            mAccessBluetoothCheckbox.isEnabled = !it
-            mAccessBluetoothCheckbox.isChecked = it
-        }
+
+        // Show last saved IP as the connect button subtitle
+        val savedHost = mSharedPref.getString("last_device_address", null)
+        if (savedHost != null) mConnectDeviceButton.summary = "Last: $savedHost  (tap to change)"
     }
 }
