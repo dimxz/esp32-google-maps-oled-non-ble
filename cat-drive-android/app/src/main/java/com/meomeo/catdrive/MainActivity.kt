@@ -85,15 +85,11 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent) {
             when (intent.action) {
                 Intents.ConnectionUpdate -> {
-                    // In the WiFi version connectedDevice carries the host IP as both name and address.
-                    // We surface it via the ViewModel the same way — UI code is unchanged.
                     val host = intent.getStringExtra("device_name")
-                    mViewModel.connectedDevice.postValue(
-                        if (host != null && intent.getStringExtra("status") == "connected")
-                            FakeDevice(host)
-                        else null
-                    )
-                    if (intent.getStringExtra("status") == "connected") {
+                    val status = intent.getStringExtra("status")
+                    // connectedDevice is now String? (host IP), null = disconnected
+                    mViewModel.connectedDevice.postValue(if (status == "connected") host else null)
+                    if (status == "connected") {
                         mSharedPref.edit()
                             .putString("last_device_name",    host)
                             .putString("last_device_address", host)
@@ -109,15 +105,6 @@ class MainActivity : AppCompatActivity() {
                     )
             }
         }
-    }
-
-    /**
-     * Lightweight stand-in for BluetoothDevice so the rest of the UI
-     * (which only reads .name) keeps working without changes.
-     */
-    private inner class FakeDevice(private val host: String) {
-        val name: String get() = host
-        val address: String get() = host
     }
 
     private val sharedPreferenceListener = OnSharedPreferenceChangeListener { _, _ ->

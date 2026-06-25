@@ -43,10 +43,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
             refreshSettings()
         }
 
-        // connectedDevice now carries the IP string in device.name / device.address
-        viewModel.connectedDevice.observe(viewLifecycleOwner) { device ->
-            mConnectDeviceButton.summary = if (device != null)
-                "Connected to ${device.name}"   // device.name == host IP in WiFi version
+        // connectedDevice is now String? (host IP) — null means disconnected
+        viewModel.connectedDevice.observe(viewLifecycleOwner) { host ->
+            mConnectDeviceButton.summary = if (host != null)
+                "Connected to $host"
             else
                 "Tap to set ESP8266 address"
         }
